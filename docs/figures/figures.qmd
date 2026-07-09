@@ -1,0 +1,505 @@
+---
+title: "Manuscript figures"
+author: "Michele Sezgin"
+format: pdf
+editor: source
+---
+
+```{r, include = F}
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(here)
+library(GLMMadaptive)
+library(gee)
+library(tidyr)
+library(DHARMa)
+library(rje)
+library(merTools)
+library(survival)
+library(tidyr)
+library(latex2exp)
+library(scales)
+library(forcats)
+
+set.seed(2025)
+theme_set(theme_bw())
+
+source(here('data', 'data-loaders', 'load_data.R'))
+```
+
+```{r, include = F}
+data_clean <- load_data()
+```
+
+```{r, include = F, message = F}
+brms_fit <- readRDS(here('data', 'models', 'brms_fit.rds'))
+brms_data <- brms_fit$fit@sim$samples |>
+  purrr::list_rbind(names_to = 'index') |>
+  group_by(index) |>
+  mutate(iter = 1:n()) |>
+  ungroup()
+
+brms_fit_rs <- readRDS(here('data', 'models', 'brms_fit_rs.rds'))
+brms_rs_data <- brms_fit_rs$fit@sim$samples |>
+  purrr::list_rbind(names_to = 'index') |>
+  group_by(index) |>
+  mutate(iter = 1:n()) |>
+  ungroup()
+
+brms_fit_apples <- readRDS(here('data', 'models', 'brms_fit_apples.rds'))
+brms_apples_data <- brms_fit_apples$fit@sim$samples |>
+  purrr::list_rbind(names_to = 'index') |>
+  group_by(index) |>
+  mutate(iter = 1:n()) |>
+  ungroup()
+```
+
+```{r, include = T, message = F}
+#| out-height: 100px
+
+# avg number of with and without
+avg_counts <- data_clean |>
+  group_by(registration_number, med_description) |>
+  summarize(n = n()) |>
+  ungroup() |>
+  group_by(med_description) |>
+  summarize(avg = mean(n) |>
+              round(2))
+
+avg_no_lasix <- avg_counts |>
+  filter(med_description == 'No Medication') |>
+  pull(avg)
+
+avg_lasix <- avg_counts |>
+  filter(med_description == 'Lasix') |>
+  pull(avg)
+```
+
+## EDA
+
+```{r, echo = T, fig.height = 7, fig.align='center', message = F}
+# #| fig.cap: 'Average horse has raced ~2 times with and without furosemide'
+
+data_clean |>
+  group_by(registration_number, lasix_ind) |>
+  summarize(num_races = n()) |> 
+  ungroup() |>
+  pivot_wider(names_from = lasix_ind, values_from = num_races) |>
+  rename(lasix = `1`, no_lasix = `0`) |>
+  group_by(lasix, no_lasix) |>
+  summarize(count = n(), log_count = log(n())) |> 
+  ggplot(aes(x = lasix, y = no_lasix, fill = log_count)) +
+  geom_tile() +
+  labs(x = "Races W/O Furosemide",
+       y = "Races With Furosemide",
+       fill = "Log\nCount") +
+  coord_fixed() +
+  scale_y_discrete() +
+  scale_y_reverse(limits = c(9, 0), breaks = 0:9) +
+  scale_x_continuous(position = "top", limits = c(0, 11), breaks = 0:11) +
+  scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+  geom_hline(linetype = 'dashed', yintercept = avg_lasix, color = 'red') +
+  geom_vline(linetype = 'dashed', xintercept = avg_no_lasix, color = 'red') +
+  theme(text=element_text(size=15)) 
+```
+
+```{r, eval = F, include = F, echo = T, fig.height = 6, fig.width = 7, fig.align='center'}
+# #| fig.cap: 'More horses finishing in the money (ITM) than expected when using furosemide.'
+data_pretty <- data_clean |>
+  mutate(in_the_money = if_else(in_the_money == 1, 'ITM', 'Not ITM'),
+         med_description = if_else(med_description == 'Lasix', 'Furosemide', med_description)) 
+
+mosaicplot(table(data_pretty$med_description, data_pretty$in_the_money),
+           shade = TRUE, main = '', cex.axis = 1)
+```
+
+```{r lasix-time, message = F, echo = T, eval = F}
+# #| fig.cap: 'Concave LASIX use over time among two-year-old and stakes race horses that have raced both with and without LASIX at least once. Red dashed line indicated HISA blanket ban date of May 22, 2023'
+data_clean |>
+  group_by(ym) |>
+  summarize(prop = mean(lasix_ind)) |>
+  ggplot(aes(x = ym, y = prop)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth() +
+  geom_vline(xintercept = as.POSIXct('2023-05-22'),
+             linetype = 'dashed',
+             color = 'red',
+             linewidth = 1) +
+  labs(x = 'Date',
+       y = 'Proportion Lasix Use') +
+  theme(text=element_text(size=15))
+```
+
+```{r odds-plot, message = F, echo = T, fig.height = 4, fig.align='center'}
+data_clean |>
+  mutate(odds_grouped = cut_number(odds, n = 10, dig.lab = 10)) |>
+  group_by(odds_grouped) |>
+  summarize(avg_itm = mean(in_the_money),
+            logit_itm = rje::logit(avg_itm),
+            count = n()) |>
+  ggplot(aes(x = odds_grouped, y = avg_itm)) +
+    geom_point(aes(size = count)) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+    labs(x = 'Odds', y = 'Proportion ITM', size = 'Count') +
+  theme(text=element_text(size=15)) +
+  scale_y_continuous(limits = c(0.2, 0.8))
+```
+
+```{r, include = F, echo = T}
+data_clean |>
+  group_by(post_position) |>
+  summarize(avg_itm = mean(in_the_money),
+            n_obs = n(),
+            se_itm = sqrt(
+              (avg_itm*(1-avg_itm))/n()
+            ),
+            upper = if_else(avg_itm + 2 * se_itm == 0, 1, pmin(avg_itm + 2 * se_itm, 1)),
+            lower = pmax(avg_itm - 2 * se_itm, 0)
+            ) |>
+  ggplot(aes(x = post_position, y = avg_itm)) +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  geom_point(size=2, shape=21, fill="white") +
+  labs(x = 'Post Position', y = 'Prop. ITM')
+```
+
+```{r, message = F, echo = T, fig.height = 7, fig.align='center'}
+pp_data <- data_clean |>
+  mutate(total_horses = total_other_horses + 1) |>
+  group_by(post_position, total_horses) |>
+  summarize(avg_itm = mean(in_the_money),
+            n = n())
+    
+pp_data |>
+  ggplot(aes(x = post_position, y = total_horses, color = avg_itm, size = n)) +
+    geom_point(shape = 'square') +
+    coord_fixed() +
+    scale_color_gradient(high = "#132B43",
+  low = "#56B1F7") +
+    labs(x = 'Post Postion', y = 'Total Horses', size = 'Count', color = 'Prop. ITM') +
+  theme(text=element_text(size=15)) +
+  scale_y_continuous(limits = c(3, 14), breaks = 3:14) +
+  scale_x_continuous(limits = c(1, 14), breaks = 1:14)
+```
+```{r, echo = F, fig.height = 5, fig.width = 6, fig.align='center', eval = F}
+mosaicplot(table(data_pretty$sex, data_pretty$in_the_money),
+           shade = TRUE, main = '', cex.axis = 1)
+```
+
+```{r, fig.width = 6, fig.height = 4, echo = T}
+data_clean |>
+  mutate(frac_lasix = frac_lasix*.01,
+         fl_gr = cut_interval(frac_lasix, n = 10)) |>
+  group_by(fl_gr) |>
+  summarize(avg_itm = mean(in_the_money),
+            n = n()) |>
+  ggplot(aes(x = fl_gr, y = avg_itm, size = n)) +
+  geom_point() +
+  ylim(0, 1) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs(x = 'Proportion of Other Horses On Furosemide',
+       y = 'Proportion ITM', size = 'Count') +
+  theme(text=element_text(size=15))
+```
+
+## Results
+
+```{r mod, include = T}
+clogit_fit <- clogit(in_the_money ~ med_description +
+                post_position +
+                splines::ns(odds, df = 4) + frac_lasix +
+                total_other_horses +
+                strata(registration_number),
+                data = data_clean)
+summary(clogit_fit)
+exp(confint(clogit_fit))
+```
+
+```{r}
+summary(brms_fit_apples)
+```
+
+```{r}
+summary(brms_fit)
+```
+
+```{r, include = F}
+brms_pred <- readRDS(here('data', 'datasets', 'brms_preds.rds'))
+brms_pred_apples <- readRDS(here('data', 'datasets', 'brms_preds_apples.rds'))
+```
+
+```{r cal-data, message = F, warning = F, echo = T}
+calibration_data <- data.frame(
+  clogit = predict(clogit_fit, type = 'lp', reference = 'strata') |>
+    rje::expit(),
+  brms = brms_pred[,1],
+  brms_apples = brms_pred_apples[,1],
+  actual = data_clean$in_the_money
+) |>
+  tidyr::pivot_longer(c(clogit, brms, brms_apples), names_to = 'model', values_to = 'pred') |>
+  mutate(model = case_when(model == 'clogit' ~ 'Cond. Logit',
+                           model == 'brms_apples' ~ 'BHLR',
+                           T ~ 'Model 3'))
+```
+
+```{r int-plot, message = F, echo = T, fig.height = 4, fig.width = 6}
+#| fig.cap: 'Predicted probabilities binned into 0.1-wide intervals.'
+calibration_data |>
+  filter(model != 'Model 3') |>
+  mutate(interval = cut(pred, breaks = seq(0, 1, by = .1), include.lowest = T)) |>
+  group_by(interval, model) |>
+  summarize(int_pred = mean(pred),
+            int_actual = mean(actual),
+            se = sqrt((int_actual*(1-int_actual))/n()),
+            n = n(),
+            ci_lower = pmax(int_actual - 2*se, 0),
+            ci_upper = pmin(int_actual + 2*se, 1)) |>
+  ggplot(aes(x = int_pred, y = int_actual, color = model)) + 
+    geom_point(alpha = 0.5, aes(size = n)) +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)) +
+    geom_smooth(se = FALSE, method = 'loess') +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    labs(x = "Predicted probability", y = "Observed fraction", color = 'Model', size = 'Count') +
+    ylim(0, 1) +
+  theme(text=element_text(size=15))
+```
+
+```{r, echo = T, message = F, fig.height = 5, fig.width = 6}
+rqr_tbl <- data_clean |>
+  mutate(lp_pred = predict(clogit_fit, type = 'lp', reference = 'strata'),
+         cdf_bound = 1 - rje::expit(lp_pred)) |>
+  rowwise() |>
+  mutate(rq_resid = if_else(in_the_money == 0,
+                            runif(1, min = 0, max = cdf_bound),
+                            runif(1, min = cdf_bound, max = 1))) |>
+  ungroup()
+
+ggplot(rqr_tbl, aes(x = odds, y = rq_resid)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  geom_hline(linetype = 'dashed', color = 'red', yintercept = .5) +
+  ylim(0, 1) +
+  theme(text=element_text(size=15)) +
+  labs(x = 'Odds', y = 'Rand. Quant. Residuals')
+```
+
+```{r, echo = T, message = F, fig.height = 5, fig.width = 6}
+rqr_tbl <- data_clean |>
+  mutate(brms_pred_apples = brms_pred_apples,
+         cdf_bound = 1 - brms_pred_apples) |>
+  rowwise() |>
+  mutate(rq_resid = if_else(in_the_money == 0,
+                            runif(1, min = 0, max = cdf_bound),
+                            runif(1, min = cdf_bound, max = 1))) |>
+  ungroup()
+
+ggplot(rqr_tbl, aes(x = odds, y = rq_resid)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  geom_hline(linetype = 'dashed', color = 'red', yintercept = .5) +
+  ylim(0, 1) +
+  theme(text=element_text(size=15)) +
+  labs(x = 'Odds', y = 'Rand. Quant. Residuals')
+```
+
+```{r, echo = T, message = F, fig.height = 5, fig.width = 6}
+rqr_tbl <- data_clean |>
+  mutate(brms_pred = brms_pred,
+         cdf_bound = 1 - brms_pred) |>
+  rowwise() |>
+  mutate(rq_resid = if_else(in_the_money == 0,
+                            runif(1, min = 0, max = cdf_bound),
+                            runif(1, min = cdf_bound, max = 1))) |>
+  ungroup()
+
+ggplot(rqr_tbl, aes(x = odds, y = rq_resid)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(se = FALSE) +
+  geom_hline(linetype = 'dashed', color = 'red', yintercept = .5) +
+  ylim(0, 1) +
+  theme(text=element_text(size=15)) +
+  labs(x = 'Odds', y = 'Rand. Quant. Residuals')
+```
+
+\vspace{200pt}
+
+
+```{r, fig.height = 5, fig.width = 6, echo = T}
+ggplot(brms_data |> mutate(index = paste0('Chain ', index)), aes(x = iter, y = sd_registration_number__Intercept)) +
+  geom_line() +
+  facet_grid(rows = vars(index)) +
+labs(y = TeX('$\\hat{\\sigma}_\\alpha$'),
+x = 'Iteration')
+```
+
+
+```{r, fig.height = 5, fig.width = 6, echo = T}
+ggplot(brms_data |> mutate(index = paste0('Chain ', index)), aes(x = iter, y = b_med_descriptionLasix)) +
+  geom_line() +
+  facet_grid(rows = vars(index)) +
+labs(y = TeX('$\\hat{\\tau}$'),
+x = 'Iteration')
+```
+
+```{r, fig.height = 5, fig.width = 6, echo = T}
+ggplot(brms_apples_data |> mutate(index = paste0('Chain ', index)), aes(x = iter, y = sd_registration_number__Intercept)) +
+  geom_line() +
+  facet_grid(rows = vars(index)) +
+labs(y = TeX('$\\hat{\\sigma}_\\alpha$'),
+x = 'Iteration')
+```
+
+```{r, fig.height = 5, fig.width = 6, echo = T}
+ggplot(brms_apples_data |> mutate(index = paste0('Chain ', index)), aes(x = iter, y = b_med_descriptionLasix)) +
+  geom_line() +
+  facet_grid(rows = vars(index)) +
+labs(y = TeX('$\\hat{\\tau}$'),
+x = 'Iteration')
+```
+
+```{r, eval = F, include = F}
+brms_rs_data |>
+  ggplot(aes(x = sd_registration_number__med_descriptionLasix)) +
+  geom_histogram() +
+  geom_vline(xintercept = quantile(brms_rs_data$sd_registration_number__med_descriptionLasix, .025), color = 'red', linetype = 'dashed') +
+  geom_vline(xintercept = quantile(brms_rs_data$sd_registration_number__med_descriptionLasix, .975), color = 'red', linetype = 'dashed') +
+  theme_bw() # +
+# labs(x = , y = 'Count')
+```
+
+```{r, message = F, echo = T, fig.height = 4, fig.width = 6}
+means <- clogit_fit$coefficients[c('med_descriptionLasix', 'post_position',
+'frac_lasix', 'total_other_horses')] |>
+sapply(exp) |>
+unname()
+
+names <- fct_inorder(c('Furosemide', 'Post Position',
+                       'Frac. Furosemide', 'Total Other Horses'))
+
+lower <- exp(confint(clogit_fit))[c('med_descriptionLasix', 'post_position',
+'frac_lasix', 'total_other_horses'),1]
+upper <- exp(confint(clogit_fit))[c('med_descriptionLasix', 'post_position',
+'frac_lasix', 'total_other_horses'), 2]
+
+clogit_forest_data <- tibble(coef = names,
+       mean = means,
+       lower = lower,
+      upper = upper)
+
+ggplot(data = clogit_forest_data) +
+  geom_vline(xintercept = 1, linetype = 'dashed', color = 'red', linewidth = .75) +
+  geom_errorbar(aes(xmin = lower, xmax = upper, y = fct_rev(coef)), linewidth = .75) +
+  geom_point(shape = 21,fill = 'white',  aes(x = mean, y = fct_rev(coef)), size = 3) +
+  labs(x = 'Odds Ratio', y = '')
+```
+
+
+```{r, message = F, echo = T, fig.height = 4, fig.width = 6}
+# library(tidybayes)
+# forest plots
+
+lower <- brms_apples_data |>
+  dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses',
+'b_post_position') |>
+  sapply(quantile, probs = .025) |>
+  sapply(exp) |>
+  unname()
+
+upper <- brms_apples_data |>
+  dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses',
+'b_post_position') |>
+  sapply(quantile, probs = .975) |>
+  sapply(exp) |>
+  unname()
+
+means <- brms_apples_data |>
+  dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses',
+'b_post_position') |>
+  colMeans() |>
+  sapply(exp) |>
+  unname()
+
+# names <- brms_apples_data |>
+#   dplyr::select(starts_with('b')) |>
+#   colnames() 
+  
+names <- fct_inorder(c('Furosemide',
+'Frac. Furosemide', 'Total Other Horses', 'Post Position'))
+
+brms_apples_forest_data <- tibble(coef = names,
+       mean = means,
+       lower = lower,
+      upper = upper)
+
+ggplot(data = brms_apples_forest_data) +
+  geom_vline(xintercept = 1, linetype = 'dashed', color = 'red', linewidth = .75) +
+  geom_errorbar(aes(xmin = lower, xmax = upper, y = fct_rev(coef)), linewidth = .75) +
+  geom_point(shape = 21,fill = 'white',  aes(x = mean, y = fct_rev(coef)), size = 3) +
+  labs(x = 'Odds Ratio', y = '')
+```
+
+```{r, message = F, echo = T, fig.height = 3, fig.width = 6}
+lower <- brms_data |>
+  dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses') |>
+  sapply(quantile, probs = .025) |>
+  sapply(exp) |>
+  unname()
+
+upper <- brms_data |>
+ dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses') |>
+  sapply(quantile, probs = .975) |>
+  sapply(exp) |>
+  unname()
+
+means <- brms_data |>
+  dplyr::select('b_med_descriptionLasix', 'b_frac_lasix', 'b_total_other_horses') |>
+  colMeans() |>
+  sapply(exp) |>
+  unname()
+
+names <- fct_inorder(c('Furosemide',
+          'Frac. Furosemide', 'Total Other Horses'))
+
+brms_forest_data <- tibble(coef = names,
+       mean = means,
+       lower = lower,
+      upper = upper,
+      model = 'Model 3')
+
+combined_data <- brms_apples_forest_data |>
+  mutate(model = 'Model 2') |>
+  bind_rows(brms_forest_data)
+
+ggplot(data = combined_data) +
+  geom_vline(xintercept = 1, linetype = 'dashed', color = 'red', linewidth = .75,
+alpha = .5) +
+  geom_errorbar(aes(xmin = lower, xmax = upper, y = fct_rev(coef), color = model),
+linewidth = .75, alpha = .5) +
+  geom_point(shape = 21, fill = 'white',  aes(x = mean, y = fct_rev(coef), color = model),
+size = 3, alpha = 0.5) +
+  labs(x = 'Odds Ratio', y = '', color = 'Model')
+```
+
+```{r, message = F, echo = T, fig.height = 4, fig.width = 6}
+# #| fig.cap: 'Predicted probabilities binned into 0.1-wide intervals.'
+calibration_data |>
+  filter(model != 'Cond. Logit') |>
+  mutate(model = if_else(model == 'BHLR', 'Model 2', model),
+  interval = cut(pred, breaks = seq(0, 1, by = .1), include.lowest = T)) |>
+  group_by(interval, model) |>
+  summarize(int_pred = mean(pred),
+            int_actual = mean(actual),
+            se = sqrt((int_actual*(1-int_actual))/n()),
+            n = n(),
+            ci_lower = pmax(int_actual - 2*se, 0),
+            ci_upper = pmin(int_actual + 2*se, 1)) |>
+  ggplot(aes(x = int_pred, y = int_actual, color = model)) + 
+    geom_point(alpha = 0.5, aes(size = n)) +
+    geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper)) +
+    geom_smooth(se = FALSE, method = 'loess') +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+    labs(x = "Predicted probability", y = "Observed fraction", color = 'Model', size = 'Count') +
+    ylim(0, 1) +
+  theme(text=element_text(size=15))
+```
+
