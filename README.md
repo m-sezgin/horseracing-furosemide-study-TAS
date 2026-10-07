@@ -18,12 +18,12 @@ The folders are organized in the following manner:
   + [datasets]() - is assumed to contain raw dataset pulled from SQL server and cleaned by `load_data()`,
   `lnl_money.rds`, and is assumed to contain model predictions produced in
   `docs/models/Sec-3.2-A.1-model-fitting.R`: `brms_pred_apples.rds`,`brms_preds.rds`.
-    NOTE: Though these objects are assumed to exist in scripts, they are not
+    NOTE: Though this folder and these objects are assumed to exist in scripts, they are not
     posted in this repository due to data sharing agreements.
   + [models]() - assumed to contain saved model objects from 
   `docs/models/Sec-3.2-A.1-model-fitting.R`: `clogit_fit.rds`, 
   `brms_fit_apples.rds`, `brms_fit_rs.rds`, and `brms_fit.rds`.
-  NOTE: Though these objects are assumed to exist in scripts, they are not
+  NOTE: Though this folder and these objects are assumed to exist in scripts, they are not
   posted in this repository due to data sharing agreements.
 
 We are unable to publicly post the matched dataset used in this analysis, but we provide
