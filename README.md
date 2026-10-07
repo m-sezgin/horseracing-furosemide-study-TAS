@@ -5,22 +5,22 @@ This repository contains the code for reproducing the results and figures in
 
 The folders are organized in the following manner:
 
-- [docs](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs) -
+- [`docs`](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs) -
    files for fitting models and reproducing final figures displayed in the
    manuscript (including supplementary materials)
-  + [figures](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs/figures) -
+  + [`figures`](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs/figures) -
   folder containing quarto figure file, `figures-tables-all-sections.qmd`, and
   rendered pdf, `figures-tables-all-sections.pdf`.
-  + [models](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs/models) - 
+  + [`models`](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/docs/models) - 
   folder containing model fitting script, `Sec-3.2-A.1-model-fitting.R`.
-- [data](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/data) - where datasets and model data are stored and loaded from to produce figures and tables.
-  + [data-loaders]() - contains data loader file `load_data.R` used to create matched sub-dataset.
-  + [datasets]() - is assumed to contain raw dataset pulled from SQL server and cleaned by `load_data()`,
+- [`data`](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/data) - where datasets and model data are stored and loaded from to produce figures and tables.
+  + [`data-loaders`](https://github.com/m-sezgin/horseracing-furosemide-study-TAS/tree/main/data/data-loaders) - contains data loader file `load_data.R` used to create matched sub-dataset.
+  + `datasets` - is assumed to exist and contain raw dataset pulled from SQL server and cleaned by `load_data()`,
   `lnl_money.rds`, and is assumed to contain model predictions produced in
   `docs/models/Sec-3.2-A.1-model-fitting.R`: `brms_pred_apples.rds`,`brms_preds.rds`.
     NOTE: Though this folder and these objects are assumed to exist in scripts, they are not
     posted in this repository due to data sharing agreements.
-  + [models]() - assumed to contain saved model objects from 
+  + `models` - assumed to exist and contain saved model objects from 
   `docs/models/Sec-3.2-A.1-model-fitting.R`: `clogit_fit.rds`, 
   `brms_fit_apples.rds`, `brms_fit_rs.rds`, and `brms_fit.rds`.
   NOTE: Though this folder and these objects are assumed to exist in scripts, they are not
